@@ -1,0 +1,1321 @@
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 1   
+
+
+C51 COMPILER V9.01, COMPILATION OF MODULE MUSICPLAYER
+OBJECT MODULE PLACED IN MusicPlayer.OBJ
+COMPILER INVOKED BY: D:\Program Files\Keil\C51\BIN\C51.EXE MusicPlayer.c LARGE BROWSE DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          #include<reg52.h>
+   2          #include"vs1003.h"
+   3          #include"vs1003_spectrum.h"
+   4          #include"sd.h"
+   5          #include"fat.h"
+   6          #include"tftlcd.h"
+   7          #include"tftchar.h"
+   8          #include"hzk16.h"
+   9          #include"chinese.h"
+  10          #include"key.h"
+  11          #include"zimo.c"
+  12          #include"ir.h"
+  13          
+  14          
+  15          //π´π≤±‰¡ø(∏√Œƒº˛÷–À˘”–µƒ∫Ø ˝π≤Õ¨Œ¨ª§)
+  16          unsigned char play_stat;//≤•∑≈◊¥Ã¨ 1-≤•∑≈µ´Œƒº˛Œ¥‘ÿ»Î 2-≤•∑≈Œƒº˛“—‘ÿ»Î 3-‘›Õ£«“Œƒº˛Œ¥‘ÿ»Î 4-‘›Õ£«“Œƒº˛“—‘ÿ
+             -»Î
+  17          unsigned char play_style;//≤•∑≈∑Ω Ω(µ•«˙—≠ª∑µ»µ»){1-µ•«˙≤•∑≈,2-µ•«˙—≠ª∑,3-À≥–Ú≤•∑≈,4-À≥–Ú—≠ª∑≤•∑≈}
+  18          bit surround_sound;//ª∑»∆“Ù±Íº« 1-”– 0-Œﬁ œ¬Õ¨
+  19          bit low_sound;//µÕ“Ùº”÷ÿ±Íº«
+  20          bit high_sound;//∏ﬂ“Ùº”«ø±Íº«
+  21          unsigned char vol;//“Ù¡ø[0,20]
+  22          
+  23          
+  24          
+  25          
+  26          
+  27          //Ω´vol“Ù¡ø◊™ªªŒ™VS1003“Ù¡ø
+  28          unsigned char code vol_tab[21]=
+  29          {0,80,110,140,160,180,190,200,205,210,215,220,225,230,235,238,241,245,248,251,254};
+  30          
+  31          //ºØ≥…∫ÏÕ‚µƒº¸≈Ã°°
+  32          bit key(unsigned char *x,unsigned char *y)
+  33          {
+  34   1              if(key1(x,y))  //∂¡∞Â…œº¸≈Ã
+  35   1                      return 1;
+  36   1              if(irRead(x,y))   //∂¡∫ÏÕ‚º¸≈Ã
+  37   1              {       delay1ms(100);//œ˚»ı∫ÏÕ‚∂‘LCDµƒ”∞œÏ
+  38   2                      switch(*y)
+  39   2                      {
+  40   3                              case 0x46:
+  41   3                              case 0x0c://∂‘”¶0
+  42   3                                      *x=0;*y=0;
+  43   3                                      break;
+  44   3                              case 0x09:
+  45   3                              case 0x18://∂‘”¶1
+  46   3                                      *x=0;*y=1;
+  47   3                                      break; 
+  48   3                              case 0x47:
+  49   3                              case 0x5e://∂‘”¶2
+  50   3                                      *x=0;*y=2;
+  51   3                                      break;
+  52   3                              case 0x40:
+  53   3                              case 0x08://∂‘”¶4
+  54   3                                      *x=1;*y=0;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 2   
+
+  55   3                                      break;
+  56   3                              case 0x44:
+  57   3                              case 0x1c://∂‘”¶5
+  58   3                                      *x=1;*y=1;
+  59   3                                      break;
+  60   3                              case 0x43:
+  61   3                              case 0x5a://∂‘”¶6
+  62   3                                      *x=1,*y=2;
+  63   3                                      break;
+  64   3                              case 0x15:
+  65   3                              case 0x52://∂‘”¶9
+  66   3                                      *x=2;*y=1;
+  67   3                                      break;
+  68   3                      }
+  69   2                      return 1;
+  70   2              }
+  71   1              return 0;
+  72   1      
+  73   1      }
+  74          
+  75          
+  76          //¥ÌŒÛ¥¶¿Ì
+  77          void Error(unsigned char i)
+  78          {
+  79   1              TFT_CHAR_TYPE=1;
+  80   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(31,0,0);
+  81   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,0,31);
+  82   1              tftSetCharWindow((128-10*8)/2,32,10*8,16);
+  83   1              tftShowStr("Error");
+  84   1              tftShowULong(i);
+  85   1              while(1);
+  86   1      }
+  87          
+  88          
+  89          
+  90          /********************************************************************************/
+  91          //∫Ø ˝√˚:get_long_file_name_from_fct
+  92          //π¶  ƒ‹:¥”Œƒº˛œÓ÷–Ã·≥ˆ∫œ∑®µƒ◊÷¥Æ
+  93          //≤Œ   ˝:fctŒ™Œƒº˛œÓ,nameŒ™¥Ê∑≈Œƒº˛√˚ ˝◊È(27B)
+  94          //∑µªÿ÷µ:
+  95          //±∏  ◊¢:Õ‚≤ø
+  96          //∏¸  –¬:2012.3.2                                                                       
+  97          /********************************************************************************/
+  98          void get_long_file_name_from_fct(FAT_DIR_ENTRY*fct,unsigned char *name)
+  99          {
+ 100   1              unsigned char i,*arr;
+ 101   1              arr=(unsigned char*)fct;
+ 102   1              for(i=0;i<10;i++)
+ 103   1                      name[i]=arr[1+i];
+ 104   1              for(i=0;i<12;i++)
+ 105   1                      name[10+i]=arr[14+i];
+ 106   1              for(i=0;i<4;i++)
+ 107   1                      name[22+i]=arr[28+i];
+ 108   1      }
+ 109          
+ 110          
+ 111          //≤•∑≈∆˜÷˜øÚº‹œ‘ æ
+ 112          void frame_show(void)
+ 113          {
+ 114   1              tftClear(0,0,128,160,tftRGB(0,31,31));
+ 115   1      
+ 116   1              //Music Player
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 3   
+
+ 117   1      
+ 118   1              TFT_CHAR_TYPE=0;
+ 119   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 120   1              tftSetCharWindow((128-12*8)/2,3,12*8,16);
+ 121   1              tftShowStr("Music Player");
+ 122   1      
+ 123   1              //∏Ë√˚øÚ
+ 124   1              tftDrawRect(6,17,6+114+1,19+64+1,1,tftRGB(10,21,10));
+ 125   1              //≤…—˘¬ øÚ
+ 126   1              tftDrawRect(8,87,8+5*8,87+16,1,tftRGB(10,21,10));
+ 127   1              //±»Ãÿ¬ øÚ
+ 128   1              tftDrawRect(64,87,64+7*8,87+16,1,tftRGB(10,21,10));
+ 129   1              //Œƒº˛¿‡–ÕøÚ
+ 130   1              tftDrawRect(96,106,96+8*3,106+16,1,tftRGB(10,21,10));
+ 131   1              //“Ù¡øøÚ
+ 132   1              tftDrawRect(24,134,24+40+2+2,134+3+1,1,tftRGB(10,21,10));
+ 133   1              //Ω¯∂»øÚ
+ 134   1              tftDrawRect(23,149,23+60+1,149+4+1,1,tftRGB(10,21,10));
+ 135   1      
+ 136   1      }
+ 137          
+ 138          //◊¥Ã¨œ‘ æ
+ 139          void set_play_stat(unsigned char stat)
+ 140          {
+ 141   1              if(stat<0 || stat>4)
+ 142   1                      return;
+ 143   1              play_stat=stat;//–ﬁ∏ƒ±‰¡ø
+ 144   1      
+ 145   1              TFT_CHAR_TYPE=1;
+ 146   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 147   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 148   1              tftSetCharWindow(7,144,16,16);
+ 149   1              switch(play_stat)
+ 150   1              {
+ 151   2                      case 1:
+ 152   2                      case 2:
+ 153   2                              tftShowChar(16,16,play_ico);
+ 154   2                              break;
+ 155   2                      case 3:
+ 156   2                      case 4:
+ 157   2                              tftShowChar(16,16,break_ico);
+ 158   2                              break;                                  
+ 159   2              }
+ 160   1      }
+ 161          
+ 162          
+ 163          //“Ù¡ø…Ë÷√≤¢œ‘ æ
+ 164          void set_vol(unsigned char v)
+ 165          {
+ 166   1              if(v>20)
+ 167   1                      return;
+ 168   1              vol=v;                                                                          //–ﬁ∏ƒ“Ù¡ø
+ 169   1              vs1003_set_volume(vol_tab[vol],vol_tab[vol]);     //…Ë÷√“Ù¡ø
+ 170   1      
+ 171   1      
+ 172   1              //œ‘ æ“Ù¡øÃı
+ 173   1              tftClear(24+2+v*2,134+2,40-v*2,1,tftRGB(10,21,10));     //«Â≥˝µ±«∞“Ù¡ø∂‘”¶œÒÀÿ“‘∫ÛµƒœÒÀÿ
+ 174   1              tftClear(24+2,134+2,v*2,1,tftRGB(30,0,0));//“ª∏ˆ“Ù¡ø”√¡Ω∏ˆœÒÀÿ±Ì æ°°À˘“‘v*2
+ 175   1      
+ 176   1              //œ‘ æ“Ù¡øÕº±Í
+ 177   1              TFT_CHAR_TYPE=1;
+ 178   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 4   
+
+ 179   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 180   1              tftSetCharWindow(8,128,16,16);
+ 181   1              if(v)
+ 182   1                      tftShowChar(16,16,vol_yes_ico);
+ 183   1              else
+ 184   1                      tftShowChar(16,16,vol_no_ico);
+ 185   1      }
+ 186          
+ 187          //∏Ë√˚œ‘ æ
+ 188          //nameŒ™“™œ‘ æµƒÕÍ’˚Œƒº˛√˚(uni=1UNICODE¬Î uni=0ASCII)
+ 189          void name_show(unsigned char *name,bit uni)
+ 190          {
+ 191   1              tftClear(7,18,112+2,64+2,tftRGB(20,40,20));
+ 192   1              TFT_CHAR_TYPE=0;
+ 193   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 194   1              tftSetCharWindow(8,19,112,64);
+ 195   1              if(uni)
+ 196   1                      tftShowUNI(name);
+ 197   1              else
+ 198   1                      tftShowGB(name);
+ 199   1      }
+ 200          
+ 201          //≤…—˘¬ œ‘ æ
+ 202          void samprate_show(unsigned short rate)
+ 203          {
+ 204   1              rate/=1000;
+ 205   1      
+ 206   1              TFT_CHAR_TYPE=1;
+ 207   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 208   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(20,40,20);
+ 209   1              tftSetCharWindow(9,88,40,16);
+ 210   1              if(rate<10)
+ 211   1                      tftShowStr(" ");
+ 212   1              tftShowULong(rate);
+ 213   1              tftShowStr("KHz");
+ 214   1      }
+ 215          //±»Ãÿ¬ œ‘ æ
+ 216          void bitrate_show(unsigned short rate)
+ 217          {
+ 218   1      
+ 219   1              TFT_CHAR_TYPE=1;
+ 220   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 221   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(20,40,20);
+ 222   1              tftSetCharWindow(65,88,56,16);
+ 223   1              if(rate<10)
+ 224   1                      tftShowStr("  ");
+ 225   1              else if(rate<100)
+ 226   1                      tftShowStr(" ");
+ 227   1              tftShowULong(rate);
+ 228   1              tftShowStr("Kbps");
+ 229   1      }
+ 230          
+ 231          
+ 232          //≤•∑≈∑Ω Ω…Ë÷√≤¢œ‘ æ
+ 233          void set_play_style(unsigned char n)
+ 234          {
+ 235   1              if(n<1 || n>4)
+ 236   1                      return;
+ 237   1              play_style=n;   //–ﬁ∏ƒ≤•∑≈∑Ω Ω
+ 238   1      
+ 239   1      //œ‘ æ≤•∑≈∑Ω Ω
+ 240   1              TFT_CHAR_TYPE=1;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 5   
+
+ 241   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 242   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 243   1              tftSetCharWindow(8,108,16*3,16);
+ 244   1              switch(play_style)
+ 245   1              {
+ 246   2                      case 1:
+ 247   2                              tftShowChar(16*3,16,style1_ico);
+ 248   2                              break;
+ 249   2                      case 2:
+ 250   2                              tftShowChar(16*3,16,style2_ico);
+ 251   2                              break;
+ 252   2                      case 3:
+ 253   2                              tftShowChar(16*3,16,style3_ico);
+ 254   2                              break;
+ 255   2                      case 4:
+ 256   2                              tftShowChar(16*3,16,style4_ico);
+ 257   2                              break;
+ 258   2              }
+ 259   1      }
+ 260          //Œƒº˛¿‡–Õœ‘ æ
+ 261          void filetype_show(unsigned char *type)
+ 262          {
+ 263   1              TFT_CHAR_TYPE=1;
+ 264   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 265   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(20,40,20);
+ 266   1              tftSetCharWindow(97,107,24,16);
+ 267   1              tftShowStr(type);       
+ 268   1      }
+ 269          
+ 270          //Œƒº˛◊‹ ±º‰œ‘ æ
+ 271          void time_show(unsigned short time)
+ 272          {
+ 273   1              tftClear(88,144,40,16,tftRGB(0,31,31));
+ 274   1      
+ 275   1              TFT_CHAR_TYPE=0;
+ 276   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 277   1              tftSetCharWindow(88,144,40,16);
+ 278   1              tftShowULong(time/60);
+ 279   1              tftShowStr(":");
+ 280   1              time%=60;
+ 281   1              if(time<10)
+ 282   1                      tftShowStr("0");
+ 283   1              tftShowULong(time);     
+ 284   1      }
+ 285          
+ 286          
+ 287          //ª∑»∆“Ù…Ë÷√≤¢Õº±Íœ‘ æ  (1-√˜œ‘°°0-∞µœ‘)
+ 288          void set_surround_sound(bit x)
+ 289          {
+ 290   1      
+ 291   1              surround_sound=x;//–ﬁ∏ƒ±‰¡ø
+ 292   1      
+ 293   1              vs1003_set_surround(surround_sound);  //…Ë÷√
+ 294   1      
+ 295   1              //œ‘ æ
+ 296   1              TFT_CHAR_TYPE=1;
+ 297   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 298   1              tftSetCharWindow(72,128,16,16);
+ 299   1              if(surround_sound)
+ 300   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,10,10);
+ 301   1              else
+ 302   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(0,26,28);
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 6   
+
+ 303   1              tftShowChar(16,16,surround_sound_ico);          
+ 304   1      
+ 305   1      }
+ 306          
+ 307          //∏ﬂµÕ“Ùµƒ…Ë÷√≤Œ’’“Ù¿÷»Ìº˛µƒ“Ù–ßµ˜Ω⁄
+ 308          //µÕ“Ù…Ë÷√≤¢Õº±Íœ‘ æ (1-√˜œ‘ 0-∞µœ‘)
+ 309          void set_low_sound(bit x)
+ 310          {
+ 311   1              low_sound=x;//–ﬁ∏ƒ±‰¡ø
+ 312   1              if(low_sound)   //…Ë÷√
+ 313   1              {
+ 314   2                      vs1003_set_bass(15,15);  //‘⁄150Hz…œ‘ˆ«ø∑÷±¥ µÕ∆µ‘⁄150Hz…œº”∑÷±¥±»Ωœ√˜œ‘
+ 315   2                      if(high_sound==0)                  //∏ﬂ“Ù≤ª¥Ê‘⁄ ¿≠µÕ∏ﬂ“Ù
+ 316   2                              vs1003_set_treble(-8,10);                               //‘⁄10KHz…œΩµµÕ∑÷±¥
+ 317   2              }       
+ 318   1              else
+ 319   1              {
+ 320   2                      vs1003_set_bass(0,0);
+ 321   2                      if(high_sound==0)               //∏ﬂ“Ù≤ª¥Ê‘⁄ πÿ±’∏ﬂ“Ù
+ 322   2                              vs1003_set_treble(0,0);         
+ 323   2              }
+ 324   1      
+ 325   1      
+ 326   1      //œ‘ æ
+ 327   1              TFT_CHAR_TYPE=1;
+ 328   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 329   1              tftSetCharWindow(88,128,16,16);
+ 330   1              if(low_sound)
+ 331   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,10,10);
+ 332   1              else
+ 333   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(0,26,28);
+ 334   1              tftShowChar(16,16,low_sound_ico);
+ 335   1      
+ 336   1      }
+ 337          
+ 338          //∏ﬂ“Ù…Ë÷√≤¢Õº±Íœ‘ æ (1-√˜œ‘ 0-∞µœ‘)
+ 339          void set_high_sound(bit x)
+ 340          {
+ 341   1              high_sound=x;//–ﬁ∏ƒ±‰¡ø
+ 342   1              if(high_sound)                  //…Ë÷√
+ 343   1              {
+ 344   2                      vs1003_set_treble(7,10);   //∏ﬂ∆µ‘⁄10KHz…œº”∑÷±¥±»Ωœ√˜œ‘
+ 345   2              }               
+ 346   1              else
+ 347   1              {
+ 348   2                      if(low_sound)                    //µÕ“Ù¥Ê‘⁄ ∏ﬂ“ÙΩµµÕ
+ 349   2                              vs1003_set_treble(-8,10);
+ 350   2                      else
+ 351   2                              vs1003_set_treble(0,0);
+ 352   2              }
+ 353   1      
+ 354   1      //œ‘ æ
+ 355   1              TFT_CHAR_TYPE=1;
+ 356   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 357   1              tftSetCharWindow(104,128,16,16);
+ 358   1              if(high_sound)
+ 359   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,10,10);
+ 360   1              else
+ 361   1                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(0,26,28);
+ 362   1              tftShowChar(16,16,high_sound_ico);
+ 363   1      }
+ 364          
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 7   
+
+ 365          
+ 366          
+ 367          /****************************************************************/
+ 368          //∫Ø ˝√˚:step_show
+ 369          //π¶  ƒ‹:Ω¯∂»ÃıÕ∆Ω¯
+ 370          //≤Œ   ˝:lengthŒ™Ω¯∂»Ãıµƒ≥§∂» resetŒ™1±Ì æ¥”ø™ ºŒª÷√÷ÿ–¬œ‘ æ’˚∏ˆΩ¯∂»Ãı resetŒ™0±Ì æΩˆœ‘ æ‘ˆº”µƒ≤ø∑÷
+ 371          /****************************************************************/
+ 372          void step_show(unsigned char length,bit reset)
+ 373          {
+ 374   1              static unsigned char fre_len;//Ω¯∂»Ãı“—œ‘ æµƒ≥§∂» (∆≥ıŒ™0º¥¥”ø™ ºµ„ª≠Ω¯∂»Ãı ,ÀÊ∫Û√øœ‘ æ“ª¥ŒæÕΩ´Ω¯∂»Ãıµ±«
+             -∞≥§∂»∏≥”ËÀ¸°°º¥œ¬¥Œ≤ª‘Ÿ¥”Õ∑œ‘ æΩ¯∂»Ãı÷±÷¡reset÷√Œª)
+ 375   1              unsigned short color=tftRGB(0x5f>>3,0x3c>>4,0x23>>3);//Ω¯∂»Ãı—’…´
+ 376   1              if(length>60)
+ 377   1                      return;
+ 378   1              if(reset||length<fre_len)  //¥”ø™ º¥¶÷ÿ–¬œ‘ æ
+ 379   1              {
+ 380   2                      fre_len=0;
+ 381   2                      tftClear(24,150,60,4,tftRGB(0,31,31));//÷√Œª∫Û«Â≥˝Ω¯∂»Ãı
+ 382   2              }                                                                                                                        
+ 383   1              if(length==fre_len)//”Î…œ¥ŒµƒΩ¯∂»Ãı≥§∂»œ‡Õ¨
+ 384   1                      return;
+ 385   1      
+ 386   1              tftClear(24+fre_len,150,length-fre_len,4,color);
+ 387   1              fre_len=length;//À¢–¬“—œ‘ æµƒ≥§∂»
+ 388   1      }
+ 389          
+ 390          
+ 391          
+ 392          //œ‘ æ∆µ∆◊
+ 393          void spec_show(bit reset)
+ 394          {
+ 395   1      
+ 396   1              unsigned short color1=tftRGB(31,0,0);     //«∞æ∞…´
+ 397   1              unsigned short color2=tftRGB(0,31,31);          //±≥æ∞…´
+ 398   1              static unsigned short spec1[14]={0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+ 399   1              static unsigned short spec2[14]={0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+ 400   1              //ptr1”√”⁄¥Ê¥¢Ω´“™ªÒ»°µƒ∆µ∆◊ ptr2”√”⁄¥Ê¥¢…œ¥Œ“—œ‘ æµƒ∆µ∆◊÷µ(Õ®π˝±»Ωœ¡Ω¥Œµƒ÷µ÷ªœ‘ æ‘ˆ¡ø÷µªÚ«Â≥˝Ωµ¡ø÷µ ±‹√‚
+             -¿À∑— ±º‰)        
+ 401   1              static unsigned short *ptr1=spec1,*ptr2=spec2;  
+ 402   1              unsigned short *tmp;
+ 403   1              unsigned char i,val1,val2,x;
+ 404   1      
+ 405   1              //œ‘ æÕÍ’˚µƒ∆µ∆◊                        
+ 406   1              if(reset)
+ 407   1              {
+ 408   2                      for(i=0;i<14;i++)
+ 409   2                              ptr2[i]=0;
+ 410   2              }
+ 411   1      
+ 412   1              x=60;//÷˘◊¥ÕºX◊¯±Í
+ 413   1              vs1003_get_spec(ptr1);
+ 414   1              for(i=0;i<14;i++) //œ‘ æ÷˘◊¥Õº
+ 415   1              {
+ 416   2                      val1=ptr1[i]&0x000f;    //»°∫Û4Œª–ßπ˚√˜œ‘
+ 417   2                      val2=ptr2[i]&0x000f;    //»°∫Û4Œª–ßπ˚√˜œ‘
+ 418   2                      if(val1>val2)                   //–¬÷µ±»æ…÷µ∂‡
+ 419   2                      {
+ 420   3                              tftClear(x,108+16-val1,1,val1-val2,color1);//Ωˆœ‘ æ‘ˆ¡ø
+ 421   3                      }else if(val1<val2)       //–¬÷µ±»æ…÷µ…Ÿ
+ 422   2                      {
+ 423   3                              tftClear(x,108+16-val2,1,val2-val1,color2);//Ωˆ«Â≥˝Ωµ¡ø
+ 424   3                      }
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 8   
+
+ 425   2                      //»Ùœ‡µ»±æ¥Œ≤ª‘Ÿœ‘ æ
+ 426   2                      x+=2;   
+ 427   2              }
+ 428   1              tmp=ptr1;
+ 429   1              ptr1=ptr2;
+ 430   1              ptr2=tmp;
+ 431   1      }
+ 432          
+ 433          
+ 434          
+ 435          
+ 436          /**********************************************************************/
+ 437          //∫Ø ˝√˚:setup
+ 438          //π¶  ƒ‹:œ‘ æ…Ë÷√¥∞ø⁄π©”√ªß…Ë÷√°°»∑∂®∫ÛÕÍ≥…œ‡πÿ…Ë÷√°°
+ 439          /**********************************************************************/
+ 440          void setup(void)
+ 441          {
+ 442   1              bit surround,low,high;//“Ù–ß…Ë÷√±‰¡ø
+ 443   1              unsigned char style;   //≤•∑≈∑Ω Ω…Ë÷√±‰¡ø
+ 444   1              unsigned char key_stat;//µ±«∞—°œÓ◊¥Ã¨0~6π≤7∏ˆ—°œÓ
+ 445   1              unsigned char code option_pos[7]={2*16,3*16,4*16,6*16,7*16,8*16,9*16};//∏˜—°œÓµƒY◊¯±Í
+ 446   1              unsigned short color1,color2;//ªÓ∂ØøÚµƒ«∞æ∞…´º∞œ˚ÕÀ…´
+ 447   1              unsigned char x,y;
+ 448   1      
+ 449   1              tftClear(0,0,128,160,tftRGB(0,31,31)); //À¢∆¡
+ 450   1      
+ 451   1              TFT_CHAR_TYPE=0;
+ 452   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 453   1      //…Ë÷√
+ 454   1              tftSetCharWindow((128-2*16)/2,0,2*16,16);
+ 455   1              tftShowGB("…Ë÷√");
+ 456   1      //“Ù–ß
+ 457   1              tftSetCharWindow(0,1*16,2*16,16);
+ 458   1              tftShowGB("“Ù–ß");
+ 459   1      //ª∑»∆“Ù
+ 460   1              tftSetCharWindow(32,2*16,3*16,16);
+ 461   1              tftShowGB("ª∑»∆“Ù");
+ 462   1      //µÕ“Ùº”÷ÿ
+ 463   1              tftSetCharWindow(32,3*16,4*16,16);
+ 464   1              tftShowGB("µÕ“Ùº”÷ÿ");
+ 465   1      //∏ﬂ“Ùº”«ø
+ 466   1              tftSetCharWindow(32,4*16,4*16,16);
+ 467   1              tftShowGB("∏ﬂ“Ùº”«ø");
+ 468   1      //≤•∑≈∑Ω Ω
+ 469   1              tftSetCharWindow(0,5*16,4*16,16);
+ 470   1              tftShowGB("≤•∑≈∑Ω Ω");
+ 471   1      //µ•«˙≤•∑≈
+ 472   1              tftSetCharWindow(32,6*16,4*16,16);
+ 473   1              tftShowGB("µ•«˙≤•∑≈");
+ 474   1      //µ•≈¡—≠ª∑
+ 475   1              tftSetCharWindow(32,7*16,4*16,16);
+ 476   1              tftShowGB("µ•«˙—≠ª∑");
+ 477   1      //À≥–Ú≤•∑≈
+ 478   1              tftSetCharWindow(32,8*16,4*16,16);
+ 479   1              tftShowGB("À≥–Ú≤•∑≈");
+ 480   1      //À≥–Ú—≠ª∑
+ 481   1              tftSetCharWindow(32,9*16,4*16,16);
+ 482   1              tftShowGB("À≥–Ú—≠ª∑");
+ 483   1      
+ 484   1              
+ 485   1              TFT_CHAR_TYPE=1;
+ 486   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 9   
+
+ 487   1      //ª∑»∆“Ù∏¥—°øÚ
+ 488   1              tftSetCharWindow(16,2*16,16,16);
+ 489   1              if(surround_sound)
+ 490   1                      tftShowChar(16,16,check_yes_ico);
+ 491   1              else
+ 492   1                      tftShowChar(16,16,check_no_ico);
+ 493   1      //µÕ“Ùº”÷ÿ∏¥—°øÚ
+ 494   1              tftSetCharWindow(16,3*16,16,16);
+ 495   1              if(low_sound)
+ 496   1                      tftShowChar(16,16,check_yes_ico);
+ 497   1              else
+ 498   1                      tftShowChar(16,16,check_no_ico);
+ 499   1      //∏ﬂ“Ùº”«ø∏¥—°øÚ
+ 500   1              tftSetCharWindow(16,4*16,16,16);
+ 501   1              if(high_sound)
+ 502   1                      tftShowChar(16,16,check_yes_ico);
+ 503   1              else
+ 504   1                      tftShowChar(16,16,check_no_ico);
+ 505   1      //µ•«˙≤•∑≈“Ù—°øÚ
+ 506   1              tftSetCharWindow(16,6*16,16,16);
+ 507   1              if(play_style==1)
+ 508   1                      tftShowChar(16,16,option_yes_ico);
+ 509   1              else
+ 510   1                      tftShowChar(16,16,option_no_ico);
+ 511   1      //µ•«˙—≠ª∑“Ù—°øÚ
+ 512   1              tftSetCharWindow(16,7*16,16,16);
+ 513   1              if(play_style==2)
+ 514   1                      tftShowChar(16,16,option_yes_ico);
+ 515   1              else
+ 516   1                      tftShowChar(16,16,option_no_ico);
+ 517   1      //À≥–Ú≤•∑≈“Ù—°øÚ
+ 518   1              tftSetCharWindow(16,8*16,16,16);
+ 519   1              if(play_style==3)
+ 520   1                      tftShowChar(16,16,option_yes_ico);
+ 521   1              else
+ 522   1                      tftShowChar(16,16,option_no_ico);
+ 523   1      //À≥–Ú—≠ª∑“Ù—°øÚ
+ 524   1              tftSetCharWindow(16,9*16,16,16);
+ 525   1              if(play_style==4)
+ 526   1                      tftShowChar(16,16,option_yes_ico);
+ 527   1              else
+ 528   1                      tftShowChar(16,16,option_no_ico);
+ 529   1      
+ 530   1      
+ 531   1              surround=surround_sound;
+ 532   1              low=low_sound;
+ 533   1              high=high_sound;
+ 534   1              style=play_style;
+ 535   1              key_stat=0;
+ 536   1              color1=tftRGB(31,0,0);
+ 537   1              color2=tftRGB(0,31,31);
+ 538   1              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color1);
+ 539   1              while(1)
+ 540   1              {
+ 541   2                      if(key(&x,&y))//”–∞¥º¸
+ 542   2                      {
+ 543   3                              delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ
+ 544   3                              switch(x*4+y)
+ 545   3                              {
+ 546   4                                      case 1://…œ
+ 547   4                                              if(key_stat==0)
+ 548   4                                                      break;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 10  
+
+ 549   4                                              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color2);//œ˚…´
+ 550   4                                              key_stat--;
+ 551   4                                              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color1);//º”…´
+ 552   4                                              break;
+ 553   4                                      case 9://œ¬
+ 554   4                                              if(key_stat==6)
+ 555   4                                                      break;
+ 556   4                                              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color2);//œ˚…´
+ 557   4                                              key_stat++;
+ 558   4                                              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color1);//º”…´
+ 559   4                                              break;
+ 560   4                                      case 5://—°÷–
+ 561   4                                              switch(key_stat)
+ 562   4                                              {
+ 563   5                                                      case 0://ª∑»∆“Ù
+ 564   5                                                              surround=~surround;
+ 565   5                                                              tftSetCharWindow(16,option_pos[key_stat],16,16);
+ 566   5                                                              if(surround)
+ 567   5                                                                      tftShowChar(16,16,check_yes_ico);
+ 568   5                                                              else
+ 569   5                                                                      tftShowChar(16,16,check_no_ico);
+ 570   5                                                              break;
+ 571   5                                                      case 1://µÕ“Ù
+ 572   5                                                              low=~low;
+ 573   5                                                              tftSetCharWindow(16,option_pos[key_stat],16,16);
+ 574   5                                                              if(low)
+ 575   5                                                                      tftShowChar(16,16,check_yes_ico);
+ 576   5                                                              else
+ 577   5                                                                      tftShowChar(16,16,check_no_ico);
+ 578   5                                                              break;
+ 579   5                                                      case 2://∏ﬂ“Ù
+ 580   5                                                              high=~high;
+ 581   5                                                              tftSetCharWindow(16,option_pos[key_stat],16,16);
+ 582   5                                                              if(high)
+ 583   5                                                                      tftShowChar(16,16,check_yes_ico);
+ 584   5                                                              else
+ 585   5                                                                      tftShowChar(16,16,check_no_ico);
+ 586   5                                                              break;
+ 587   5                                                      case 3://µ•«˙≤•∑≈
+ 588   5                                                      case 4://µ•«˙—≠ª∑
+ 589   5                                                      case 5://À≥–Ú≤•∑≈
+ 590   5                                                      case 6://À≥–Ú—≠ª∑
+ 591   5                                                              tftSetCharWindow(16,option_pos[style+2],16,16);
+ 592   5                                                              tftShowChar(16,16,option_no_ico);
+ 593   5                                                              style=key_stat-2;
+ 594   5                                                              tftSetCharWindow(16,option_pos[key_stat],16,16);
+ 595   5                                                              tftShowChar(16,16,option_yes_ico);
+ 596   5                                                              break;
+ 597   5                                              }
+ 598   4                                              tftDrawRect(16,option_pos[key_stat],31,option_pos[key_stat]+15,1,color1);//º”…´
+ 599   4                                              break;
+ 600   4                                      case 0://»∑∂®
+ 601   4                                              surround_sound=surround;
+ 602   4                                              low_sound=low;
+ 603   4                                              high_sound=high;
+ 604   4                                              play_style=style;
+ 605   4                                              return;                                 
+ 606   4                                      case 2://»°œ˚
+ 607   4                                              return;
+ 608   4                              }
+ 609   3                      }                               
+ 610   2              }
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 11  
+
+ 611   1      
+ 612   1      }
+ 613          
+ 614          
+ 615          
+ 616          /**********************************************************************/
+ 617          //∫Ø ˝√˚:record
+ 618          //π¶  ƒ‹:œ‘ æ¬º“Ùª˙ΩÁ√Ê π©”√ªß…Ë÷√ …Ë÷√»∑∂®∫Ûø™ º¬º“Ù ¬º“Ù ˝æ›±£¥Ê‘⁄SDø®÷–
+ 619          /**********************************************************************/
+ 620          void recorder(void)
+ 621          {
+ 622   1              unsigned char option_stat;//µ±«∞…Ë÷√œÓ 0-Œƒº˛√˚–Ú∫≈ 1- ± 2-∑÷ 3-√Î
+ 623   1              unsigned char x,y;
+ 624   1              bit isLock;//À¯∂®—°œÓ ÷ª”–œ»À¯∂®≤≈ƒ‹∏¸∏ƒ÷µ
+ 625   1              unsigned short lockColor=tftRGB(31,0,0);//—°œÓ±ªÀ¯∂® ±µƒ«∞æ∞…´
+ 626   1              unsigned short unlockColor=tftRGB(5,5,5);//—°œÓŒ¥±ªÀ¯∂® ±µƒ«∞æ∞…´
+ 627   1              unsigned char code option_pos[][2]=
+ 628   1              {
+ 629   1                      {76,16*2},//Œƒº˛–Ú∫≈—°œÓŒª÷√
+ 630   1                      {16,16*4},// ±—°œÓŒª÷√
+ 631   1                      {48,16*4},//∑÷—°œÓŒª÷√
+ 632   1                      {80,16*4}       //√ÎŒª÷√
+ 633   1              };
+ 634   1              unsigned char code option_max[4]={99,99,59,59};  //∏˜—°œÓÀ˘‘ –Ìµƒ◊Ó¥Û÷µ
+ 635   1              unsigned char option_val[4]={0,0,1,0};//∏˜—°œÓµƒµ±«∞÷µ
+ 636   1      
+ 637   1              FAT_FILE file;
+ 638   1              unsigned char file_name[11]={'R','E','C','O','R','D',' ',' ','M','P','3'};
+ 639   1              unsigned long file_size;
+ 640   1              RiffHeader *head=FAT_BUF;
+ 641   1      
+ 642   1              tftClear(0,0,128,160,tftRGB(0,31,31)); //À¢∆¡
+ 643   1      
+ 644   1              TFT_CHAR_TYPE=1;
+ 645   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(5,5,5);
+ 646   1              TFT_CHAR_WINDOW_BACKCOLOR=tftRGB(0,31,31);
+ 647   1      
+ 648   1              //¬º“Ùª˙
+ 649   1              tftSetCharWindow((128-3*16)/2,0,3*16,16);
+ 650   1              tftShowGB("¬º“Ùª˙");
+ 651   1              //±£¥ÊŒƒº˛√˚Œ™:
+ 652   1              tftSetCharWindow(0,16,7*16,16);
+ 653   1              tftShowGB("±£¥ÊŒƒº˛√˚Œ™:");
+ 654   1              //RECORD
+ 655   1              tftSetCharWindow((128-9*8)/2,16*2,6*8,16);
+ 656   1              tftShowGB("RECORD");
+ 657   1              //◊Ó¥Û¬º“Ù ±º‰Œ™:
+ 658   1              tftSetCharWindow(0,16*3,8*16,16);
+ 659   1              tftShowGB("◊Ó¥Û¬º“Ù ±º‰Œ™:");
+ 660   1              //   ±  ∑÷  √Î
+ 661   1              tftSetCharWindow((128-6*16)/2,16*4,6*16,16);
+ 662   1              tftShowGB("   ±  ∑÷  √Î");
+ 663   1      
+ 664   1              option_stat=0; //µ±«∞—°œÓŒ™Œƒº˛–Ú∫≈
+ 665   1              isLock=0;          //Œ¥À¯∂®◊¥Ã¨
+ 666   1      
+ 667   1              tftSetCharWindow(option_pos[0][0],option_pos[0][1],16,16);
+ 668   1              tftShowULong(option_val[0]);   //œ‘ æŒƒº˛–Ú∫≈
+ 669   1              tftSetCharWindow(option_pos[1][0],option_pos[1][1],16,16);
+ 670   1              tftShowULong(option_val[1]);   //œ‘ æ ±
+ 671   1              tftSetCharWindow(option_pos[2][0],option_pos[2][1],16,16);
+ 672   1              tftShowULong(option_val[2]);   //œ‘ æ∑÷
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 12  
+
+ 673   1              tftSetCharWindow(option_pos[3][0],option_pos[3][1],16,16);
+ 674   1              tftShowULong(option_val[3]);   //œ‘ æ√Î
+ 675   1              tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,option_po
+             -s[option_stat][1]+15,1,tftRGB(31,0,0));
+ 676   1              while(1)
+ 677   1              {
+ 678   2                      if(key(&x,&y))
+ 679   2                      {
+ 680   3                              delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ
+ 681   3                              switch(x*4+y)
+ 682   3                              {
+ 683   4                                      case 0://”√ªß»∑∂®¡À ø™ º◊º±∏ø’º‰ ¬º“Ù
+ 684   4      //                                      tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opt
+             -ion_pos[option_stat][1]+15,1,tftRGB(0,31,31));//œ˚øÚ
+ 685   4                                              TFT_CHAR_WINDOW_FORECOLOR=unlockColor;
+ 686   4                                              tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 687   4                                              tftShowULong(option_val[option_stat]);  //÷ÿœ‘µ±«∞÷µ
+ 688   4                                              if(option_val[option_stat]<10)
+ 689   4                                              tftShowStr(" ");//µ⁄∂˛Œª≤πø’
+ 690   4      
+ 691   4                                              if(option_val[0]<10)
+ 692   4                                              {
+ 693   5                                                      file_name[6]='0'+option_val[0];
+ 694   5                                                      file_name[7]=' ';
+ 695   5                                              }
+ 696   4                                              else
+ 697   4                                              {
+ 698   5                                                      file_name[6]='0'+option_val[0]/10;
+ 699   5                                                      file_name[7]='0'+option_val[0]%10;
+ 700   5                                              }
+ 701   4      
+ 702   4                                              file_size=((unsigned long)option_val[1]*60+option_val[2])*60+option_val[3];//º∆À„√Î ˝
+ 703   4                                              if(file_size==0)
+ 704   4                                              {//√Î ˝Œ™0
+ 705   5                                                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(31,0,0);
+ 706   5                                                      tftSetCharWindow(0,5*16,128,32);
+ 707   5                                                      tftShowGB("¬º“Ù ±º‰Ã´∂Ã!");
+ 708   5                                                      delay10ms(200);
+ 709   5                                                      tftClear(0,5*16,128,32,tftRGB(0,31,31));
+ 710   5                                                      option_stat=3;//µ±«∞—°œÓ…ËŒ™√Î
+ 711   5                                                      isLock=1;//À¯∂®∏√œÓ
+ 712   5                                                      TFT_CHAR_WINDOW_FORECOLOR=lockColor;
+ 713   5                                                      tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 714   5                                                      tftShowULong(option_val[option_stat]);  //÷ÿœ‘µ±«∞÷µ
+ 715   5                                                      if(option_val[option_stat]<10)
+ 716   5                                                      tftShowStr(" ");//Ωµ÷µ ± ø…ƒ‹¥”¡ΩŒªΩµŒ™“ªŒª À˘“‘µ⁄∂˛Œª≤πø’                                      
+ 717   5                                                      tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opti
+             -on_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ                                                                                                                                                                                          
+ 718   5                                                      break;
+ 719   5                                              }
+ 720   4                                              file_size*=8110ul;      // 8110B/s
+ 721   4                                              file_size+=512;//º∆À„Œƒº˛¥Û–°
+ 722   4      
+ 723   4      
+ 724   4                                              if(fat_open_file(file_name,1,&file)==0)
+ 725   4                                              {       //∏√Œƒº˛“—¥Ê‘⁄ Ã· æ”√ªß
+ 726   5                                                      TFT_CHAR_WINDOW_FORECOLOR=tftRGB(31,0,0);
+ 727   5                                                      tftSetCharWindow(0,5*16,128,32);
+ 728   5                                                      tftShowGB("Œƒº˛“—¥Ê‘⁄, «∑Ò∏≤∏«?");
+ 729   5                                                      option_stat=1;   //ΩË”√±‰¡ø
+ 730   5                                                      while(option_stat)
+ 731   5                                                      {
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 13  
+
+ 732   6                                                              if(key(&x,&y))
+ 733   6                                                              {
+ 734   7                                                                      delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ      
+ 735   7                                                                      switch(x*4+y)
+ 736   7                                                                      {
+ 737   8                                                                              case 0://∏≤∏«‘≠Œƒº˛
+ 738   8                                                                                      isLock=1;//ΩË”√±‰¡ø
+ 739   8                                                                                      option_stat=0;
+ 740   8                                                                                      break;
+ 741   8                                                                              case 2://≤ª∏≤∏«‘≠Œƒº˛
+ 742   8                                                                                      isLock=0;//ΩË”√±‰¡ø
+ 743   8                                                                                      option_stat=0;
+ 744   8                                                                                      break;
+ 745   8                                                                      }
+ 746   7                                                              }
+ 747   6                                                      }
+ 748   5                                                      tftClear(0,5*16,128,32,tftRGB(0,31,31));
+ 749   5                                                      if(isLock==0)
+ 750   5                                                      {//”√ªß“™«Û≤ª∏≤∏«
+ 751   6                                                              option_stat=0;//µ±«∞—°œÓ…ËŒ™Œƒº˛–Ú∫≈
+ 752   6                                                              isLock=1;//À¯∂®∏√œÓ
+ 753   6                                                              TFT_CHAR_WINDOW_FORECOLOR=lockColor;
+ 754   6                                                              tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 755   6                                                              tftShowULong(option_val[option_stat]);  //÷ÿœ‘µ±«∞÷µ
+ 756   6                                                              if(option_val[option_stat]<10)
+ 757   6                                                                      tftShowStr(" ");//µ⁄∂˛Œª≤πø’                                    
+ 758   6                                                              tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opt
+             -ion_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ                                                                                                                                                                                         
+ 759   6                                                              break;                                          
+ 760   6                                                      }
+ 761   5                                                      TFT_CHAR_WINDOW_FORECOLOR=unlockColor;
+ 762   5                                                      tftSetCharWindow(0,5*16,128,16);
+ 763   5                                                      tftShowGB("◊º±∏ø’º‰÷–...");
+ 764   5                                                      if(fat_file_resize(file_size,&file))
+ 765   5                                                              Error(30);
+ 766   5                                                      tftShowGB("∫√");        
+ 767   5                                              }else
+ 768   4                                              {
+ 769   5                                                      //¥¥Ω®Œƒº˛
+ 770   5                                                      TFT_CHAR_WINDOW_FORECOLOR=unlockColor;
+ 771   5                                                      tftSetCharWindow(0,5*16,128,16);
+ 772   5                                                      tftShowGB("◊º±∏ø’º‰÷–...");
+ 773   5                                                      if(fat_open_file(file_name,0,&file))
+ 774   5                                                              Error(31);
+ 775   5                                                      if(fat_file_resize(file_size,&file))
+ 776   5                                                              Error(32);
+ 777   5                                                      tftShowGB("∫√");
+ 778   5                                              }
+ 779   4                                              //À˘‘⁄◊º±∏π§◊˜“—æÕ–˜
+ 780   4                                              tftSetCharWindow(0,6*16,128,16);
+ 781   4                                              tftShowGB("∞¥»Œ“‚º¸ø™ º");
+ 782   4                                              if(fat_file_write(&file))//–¥ºŸÕ∑ƒ£∞Â
+ 783   4                                                      Error(33);
+ 784   4                                              tftSetCharWindow(0,7*16,128,16);
+ 785   4                                              while(key(&x,&y)==0);  //µ»¥˝”√ªß∞¥º¸
+ 786   4                                              delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ
+ 787   4                                              vs1003_start_adpcm(0,1);//¥”¬ÛøÀ∑Á ø™∆Ù∏ﬂÕ®¬À≤® ø™∆Ù¬º“Ùƒ£ Ω
+ 788   4                                              tftShowGB("¬º“Ù÷–...");
+ 789   4                                              tftSetCharWindow(0,8*16,128,16);
+ 790   4                                              tftShowGB("∞¥»Œ“‚º¸Õ£÷π¬º“Ù");
+ 791   4                                              file_size-=512;
+ 792   4                                              while(1)
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 14  
+
+ 793   4                                              {
+ 794   5                                                      vs1003_get_adpcm(FAT_BUF);       //∂¡»°¬º“Ù ˝æ›
+ 795   5                                                      vs1003_get_adpcm(FAT_BUF+256);
+ 796   5                                                      if(fat_file_write(&file))       //–¥»ÎŒƒº˛÷–
+ 797   5                                                              Error(34);
+ 798   5                                                      if(file_size<512)        //æÕ∫Û“ª∏ˆ≤ª¬˙…»«¯µƒ ˝æ›Ω´∂™∆˙
+ 799   5                                                      {
+ 800   6                                                              file_size=0;
+ 801   6                                                              break;
+ 802   6                                                      }
+ 803   5                                                      file_size-=512;
+ 804   5                                                      if(key(&x,&y))//”√ªß∞¥º¸¡À ¿Îø™
+ 805   5                                                      {
+ 806   6                                                              delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ
+ 807   6                                                              break;
+ 808   6                                                      }
+ 809   5                                              }
+ 810   4                                              vs1003_stop_adpcm();//πÿ±’¬º“Ùƒ£ Ω
+ 811   4                                              if(fat_file_resize(file.file_size - file_size,&file))  //÷ÿ÷√Œƒº˛¥Û–°
+ 812   4                                                      Error(35);
+ 813   4                                              if(fat_file_set_offset(0,&file))
+ 814   4                                                      Error(36);
+ 815   4                                              for(lockColor=0;lockColor<512;lockColor++)         //∏¥÷∆Œƒº˛Õ∑ƒ£∞Â
+ 816   4                                                      FAT_BUF[lockColor]=RIFF_header[lockColor];
+ 817   4                                              head->ChunkSize=file.file_size-8;//ÃÓ≥‰Œƒº˛≥§∂»
+ 818   4                                              fat_l2be((U8*)&(head->ChunkSize),4);
+ 819   4                                              head->SubChunk3Size = file.file_size-512;//ÃÓ≥‰ ˝æ›≥§∂»
+ 820   4                                              fat_l2be((U8*)&(head->SubChunk3Size),4);
+ 821   4                                              head->NumOfSamples=(file.file_size-512)/256 * 505ul;    //ÃÓ≥‰≤…—˘ ˝
+ 822   4                                              fat_l2be((U8*)&(head->NumOfSamples),4);
+ 823   4                                              if(fat_file_write(&file)) //–¥ªÿ ◊…»«¯
+ 824   4                                                      Error(37);                              
+ 825   4                                              if(fat_close_file(&file))  //πÿ±’Œƒº˛
+ 826   4                                                      Error(38);
+ 827   4                                              tftSetCharWindow((128-4*16)/2,9*16,4*16,16);
+ 828   4                                              tftShowGB("¬º“ÙÕÍ≥…");
+ 829   4                                              delay10ms(200);
+ 830   4                                              return ;
+ 831   4                                      case 1://”√ªß∞¥¡À…œº¸
+ 832   4                                              if(isLock)
+ 833   4                                              {//‘⁄’‚¿Ô‘ˆ÷µ
+ 834   5                                                      option_val[option_stat] = (option_val[option_stat]+1) % (option_max[option_stat]+1); //‘ˆ÷µ
+ 835   5                                                      tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 836   5                                                      tftShowULong(option_val[option_stat]);  //÷ÿœ‘µ±«∞÷µ
+ 837   5                                                      if(option_val[option_stat]<10)
+ 838   5                                                      tftShowStr(" ");//Ωµ÷µ ± ø…ƒ‹¥”¡ΩŒªΩµŒ™“ªŒª À˘“‘µ⁄∂˛Œª≤πø’                                      
+ 839   5                                                      tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opti
+             -on_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ                                                                                  
+ 840   5                                              }else
+ 841   4                                              {//‘⁄’‚…œ“∆“ª∏ˆ—°œÓ
+ 842   5                                                      if(option_stat>0)
+ 843   5                                                      {
+ 844   6                                                              option_stat--;
+ 845   6                                                              tftDrawRect(option_pos[option_stat+1][0],option_pos[option_stat+1][1],option_pos[option_stat+1][0]+
+             -15,option_pos[option_stat+1][1]+15,1,tftRGB(0,31,31));//œ˚øÚ
+ 846   6                                                              tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opt
+             -ion_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ
+ 847   6                                                      }                                       
+ 848   5                                              }
+ 849   4                                              break;
+ 850   4                                      case 2://”√ªß»°œ˚¡À±æ¥Œ¬º“Ù≤Ÿ◊˜
+ 851   4                                              return ;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 15  
+
+ 852   4                                      case 5://”√ªß∞¥¡ÀÀ¯∂®/Ω‚À¯∂®º¸
+ 853   4                                              if(isLock)
+ 854   4                                              {//Ω‚À¯∂®
+ 855   5                                                      isLock=0;//Œ¥À¯∂®±Íº«
+ 856   5                                                      TFT_CHAR_WINDOW_FORECOLOR=unlockColor;
+ 857   5                                              }else
+ 858   4                                              {//À¯∂®µ±«∞œÓ
+ 859   5                                                      isLock=1;//À¯∂®±Íº«
+ 860   5                                                      TFT_CHAR_WINDOW_FORECOLOR=lockColor;
+ 861   5                                              }
+ 862   4                                              tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 863   4                                              tftShowULong(option_val[option_stat]);                                          
+ 864   4                                              tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,optio
+             -n_pos[option_stat][1]+15,1,tftRGB(31,0,0));
+ 865   4                                              break;
+ 866   4                                      case 9://”√ªß∞¥¡Àœ¬º¸
+ 867   4                                              if(isLock)
+ 868   4                                              {//‘⁄’‚¿ÔΩµ÷µ
+ 869   5                                                      if(option_val[option_stat]==0)
+ 870   5                                                              option_val[option_stat]=option_max[option_stat];
+ 871   5                                                      else
+ 872   5                                                              option_val[option_stat]--; //Ωµ÷µ
+ 873   5                                                      tftSetCharWindow(option_pos[option_stat][0],option_pos[option_stat][1],16,16);
+ 874   5                                                      tftShowULong(option_val[option_stat]);  //÷ÿœ‘µ±«∞÷µ
+ 875   5                                                      if(option_val[option_stat]<10)
+ 876   5                                                      tftShowStr(" ");//Ωµ÷µ ± ø…ƒ‹¥”¡ΩŒªΩµŒ™“ªŒª À˘“‘µ⁄∂˛Œª≤πø’                              
+ 877   5                                                      tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opti
+             -on_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ                                                                          
+ 878   5                                              }else
+ 879   4                                              {//‘⁄’‚…œ“∆“ª∏ˆ—°œÓ
+ 880   5                                                      if(option_stat<3)
+ 881   5                                                      {
+ 882   6                                                              option_stat++;
+ 883   6                                                              tftDrawRect(option_pos[option_stat-1][0],option_pos[option_stat-1][1],option_pos[option_stat-1][0]+
+             -15,option_pos[option_stat-1][1]+15,1,tftRGB(0,31,31));//œ˚øÚ
+ 884   6                                                              tftDrawRect(option_pos[option_stat][0],option_pos[option_stat][1],option_pos[option_stat][0]+15,opt
+             -ion_pos[option_stat][1]+15,1,tftRGB(31,0,0));//œ‘ æøÚ
+ 885   6                                                      }                                       
+ 886   5                                              }
+ 887   4                                              break;
+ 888   4                              }       
+ 889   3                      }               
+ 890   2              }
+ 891   1      }
+ 892          
+ 893          
+ 894          
+ 895          //“Ù¿÷≤•∑≈∆˜÷˜≥Ã–Ú
+ 896          void main()
+ 897          {
+ 898   1              unsigned char *buf=FAT_BUF;//π´”√ª∫≥Â«¯
+ 899   1              unsigned short file_total;//∏˘ƒø¬º÷–“Ù¿÷Œƒº˛◊‹ ˝
+ 900   1              unsigned short file_id;//µ±«∞Œƒº˛∫≈(¥”1ø™ º,◊Ó¥ÛµΩfile_total)
+ 901   1              unsigned char file_name[106];//”√”⁄±£¥ÊŒƒº˛√˚(◊Ó∂‡ø…¥Ê∑≈52∏ˆUNICODE¬Î)
+ 902   1              bit file_name_type;                     //Œƒº˛√˚¿‡–Õ1-UNICODE 0-ASCII¬Î
+ 903   1              unsigned long remain_size;//µ»¥˝≤•∑≈µƒ“Ù¿÷ £”‡◊÷Ω⁄ ˝(∆ ºµ»”⁄“Ù¿÷Œƒº˛¥Û–°)
+ 904   1      
+ 905   1      
+ 906   1              FAT_FILE mp3File;
+ 907   1      
+ 908   1              FAT_DIR_ENTRY *fct=buf;
+ 909   1              unsigned long seq;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 16  
+
+ 910   1              unsigned char i,x,y;
+ 911   1              unsigned short time;
+ 912   1              RiffHeader *wavHead=FAT_BUF;
+ 913   1      
+ 914   1      
+ 915   1              tftInit();
+ 916   1      
+ 917   1              TFT_CHAR_TYPE=0;
+ 918   1              tftClear(0,0,128,160,tftRGB(0,31,31));
+ 919   1      
+ 920   1              //LOGO
+ 921   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,10,0);
+ 922   1              tftSetCharWindow(4,16,120,94);
+ 923   1              tftShowChar(120,94,music_logo);
+ 924   1      
+ 925   1              //“Ù¿÷≤•∑≈∆˜
+ 926   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,5,0);
+ 927   1              tftSetCharWindow((128-16*5)/2,2,16*5,16);
+ 928   1              for(i=0;i<5;i++)
+ 929   1                      tftShowChar(16,16,yybfq+i*32);
+ 930   1      
+ 931   1              //≥ı ºªØ...
+ 932   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(10,21,10);
+ 933   1              tftSetCharWindow(8,128,15*8,16);
+ 934   1              for(i=0;i<3;i++)
+ 935   1                      tftShowChar(16,16,csh+i*32);
+ 936   1              tftShowStr("...");
+ 937   1      
+ 938   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(31,0,0);
+ 939   1              //≥ı ºªØ”≤º˛
+ 940   1              if(sd_init())
+ 941   1              {
+ 942   2                      tftShowStr("SD Err");
+ 943   2                      while(1);
+ 944   2              }
+ 945   1      
+ 946   1              if(fat_init(0))
+ 947   1              {
+ 948   2                      tftShowStr("FatErr");
+ 949   2                      while(1);
+ 950   2              }
+ 951   1      
+ 952   1              if(hzk16_init())
+ 953   1              {
+ 954   2                      tftShowStr("HzkErr");
+ 955   2                      while(1);
+ 956   2              }
+ 957   1              if(hzk16_uni_init())
+ 958   1              {
+ 959   2                      tftShowStr("UniErr");
+ 960   2                      while(1);
+ 961   2              }
+ 962   1      
+ 963   1              vs1003_sine_test();       //’˝œ“≤‚ ‘
+ 964   1              vs1003_init();             //VS1003≥ı ºªØ
+ 965   1              vs1003_soft_reset();    //VS1003»Ìº˛∏¥Œª
+ 966   1      //      vs1003_load_patch();    //∏¯VS1003¥Ú∆µ∆◊π¶ƒ‹≤π∂°≥Ã–Ú
+ 967   1              irInit();                        //∫ÏÕ‚≥ı ºªØ
+ 968   1      
+ 969   1              file_id=1;
+ 970   1              //œ¬»˝––º∆À„SDø®÷–π≤”–∂‡…Ÿ ◊“Ù¿÷
+ 971   1              file_total=0;
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 17  
+
+ 972   1              while(fat_open_file("????????MP3",file_total,&mp3File)==0)file_total++;
+ 973   1              file_total--;
+ 974   1                                         
+ 975   1                                                                                                                               
+ 976   1              play_style=3;                                                                                                              //ƒ¨»œ≤•∑≈∑Ω Ω
+ 977   1              play_stat=1;                                                                                                       //ø™ª˙≤•∑≈
+ 978   1              surround_sound=0;                                                                                                       //Œﬁª∑»∆                
+ 979   1              low_sound=0;                                                                                                       //ŒﬁµÕ“Ù
+ 980   1              high_sound=0;                                                                                                           //Œﬁ∏ﬂ“Ù
+ 981   1              vol=15;                                                                                                                    //ƒ¨»œ“Ù¡ø
+ 982   1      
+ 983   1      
+ 984   1              //≥ı ºªØ≥…π¶
+ 985   1              TFT_CHAR_WINDOW_FORECOLOR=tftRGB(0,63,0);
+ 986   1              tftShowStr("[OK]");
+ 987   1      
+ 988   1      
+ 989   1      
+ 990   1              delay10ms(100);//µ»¥˝ ˝√ÎΩ¯»Î÷˜ΩÁ√Ê
+ 991   1      
+ 992   1      
+ 993   1      ////////////////////////////////////////////////////////////////////////////
+ 994   1      //“‘œ¬Œ™÷˜≤Ÿ◊˜ΩÁ√Ê
+ 995   1      ////////////////////////////////////////////////////////////////////////////
+ 996   1      
+ 997   1              frame_show();                                   //œ‘ æøÚº‹
+ 998   1              set_play_style(play_style);       //…Ë÷√≤¢œ‘ æƒ¨»œ≤•∑≈∑Ω Ω
+ 999   1              set_vol(vol);                              //…Ë÷√≤¢œ‘ æƒ¨»œ“Ù¡ø
+1000   1              set_surround_sound(surround_sound);   //…Ë÷√≤¢œ‘ æƒ¨»œª∑»∆“Ù
+1001   1              set_low_sound(low_sound);          //…Ë÷√≤¢œ‘ æƒ¨»œµÕ“Ù
+1002   1              set_high_sound(high_sound);                //…Ë÷√≤¢œ‘ æƒ¨»œ∏ﬂ“Ù
+1003   1              set_play_stat(play_stat);                                  //œ‘ æ‘›Õ£(√ø ◊∏Ë≤•∑≈ ±ª·◊‘∂Ø∏ƒ±‰≤•∑≈◊¥Ã¨)
+1004   1      
+1005   1      
+1006   1              if(file_total==0)
+1007   1              {
+1008   2                      name_show("SDø®÷–√ª”–“Ù¿÷Œƒº˛!",0);
+1009   2                      while(1);
+1010   2              }
+1011   1      
+1012   1              while(1)
+1013   1              {
+1014   2                      if(play_stat==1)
+1015   2                      {       //‘ÿ»Î“Ù¿÷Œƒº˛
+1016   3                              if(fat_open_file("????????MP3",file_id,&mp3File))
+1017   3                                      Error(2);
+1018   3                              remain_size=mp3File.file_size;
+1019   3                              i=mp3File.dir_entry_offset;
+1020   3                              sd_read_sector(mp3File.dir_entry_sector,buf);
+1021   3                              if(fat_has_long_file_name(fct+i))
+1022   3                              {       //œ‘ æ≥§Œƒº˛√˚
+1023   4                                      for(x=0;x<4;x++)//◊Ó∂‡»°4∏ˆ≥§Œƒº˛œÓ
+1024   4                                      {
+1025   5                                              if(i==0)
+1026   5                                              {//µ±«∞Œƒº˛œÓ‘⁄…»«¯ ◊≤ø –Ë¥”«∞“ª∏ˆ…»«¯»°≥§Œƒº˛√˚
+1027   6                                                      if(sd_read_sector(mp3File.dir_entry_sector-1,buf))      //∂¡«∞“ª∏ˆ…»«¯  (“˛∫¨¡À“ª∏ˆBUG°°«∞“ª∏ˆ…»«¯∫≈≤¢≤ª“ª
+             -∂® «µ±«∞…»«¯∫≈-1)
+1028   6                                                              Error(6);
+1029   6                                                      i=512/32-1;//«∞“ª∏ˆ…»«¯◊Ó∫Û“ª∏ˆŒƒº˛œÓ
+1030   6                                              }else{
+1031   6                                                      i--;                                                                              //«∞“∆“ª∏ˆŒƒº˛œÓ
+1032   6                                              }
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 18  
+
+1033   5                                              if(fat_dir_entry_type(fct+i)==FAT_DIR_ENTRY_LONG_FILE)
+1034   5                                              {// «≥§Œƒº˛œÓ
+1035   6                                                      get_long_file_name_from_fct(fct+i,file_name+x*26);      
+1036   6                                              }else
+1037   5                                              {       //≤ª «≥§Œƒº˛œÓ¡À
+1038   6                                                      break;
+1039   6                                              }
+1040   5                                      }
+1041   4                                      file_name[x*26]=file_name[x*26+1]=0;    //◊Ó∫ÛÃÌ¡Ω∏ˆ0 πª≥…”––ßµƒUNICODE¬Î
+1042   4                                      file_name_type=1; //≥§Œƒº˛√˚
+1043   4                              }else
+1044   3                              {       //œ‘ æ∂ÃŒƒº˛√˚
+1045   4                                      for(x=0;x<8;x++)
+1046   4                                              file_name[x]=fct[i].file_name[x];
+1047   4                                      file_name[8]='.';
+1048   4                                      for(x=9;x<12;x++)
+1049   4                                              file_name[x]=fct[i].extend_name[x-9];
+1050   4                                      file_name[x]=0;
+1051   4                                      file_name_type=0;  //∂ÃŒƒº˛√˚
+1052   4                              }
+1053   3                              name_show(file_name,file_name_type);                            //œ‘ æ∏Ë√˚
+1054   3                              samprate_show(0);        //Œ¥ªÒµ√”––ß≤…—˘¬ «∞œ‘ æŒ™0  œ¬Õ¨
+1055   3                              bitrate_show(0);                
+1056   3                              filetype_show("NUL");
+1057   3                              seq=15;//‘⁄play_stat=2ÀÕ ˝æ› ±   ±ªÒ»°±»Ãÿ¬ µ»µ»         
+1058   3                              set_play_stat(2);        //œ‘ æ≤•∑≈◊¥Ã¨  //◊¥Ã¨∏ƒŒ™≤•∑≈Œƒº˛“—‘ÿ»Î
+1059   3                              step_show(0,1); //«Âø’Ω¯∂»Ãı
+1060   3                              time_show(0);
+1061   3                              vs1003_soft_reset();    //Ω‚¬Î–æ∆¨»Ì∏¥Œª ◊º±∏Ω‚¬Î
+1062   3                              vs1003_load_patch();    //”…”⁄»Ì»Ì∏¥Œª–Ë÷ÿ–¬¥Ú≤π∂°
+1063   3                      }
+1064   2                      else if(play_stat==2)
+1065   2                      {       //ÀÕ“Ù¿÷ ˝æ›
+1066   3                              x=fat_file_read(&mp3File);
+1067   3                              if(x!=0 && x!=2)
+1068   3                                      Error(4);
+1069   3                              if(remain_size<=512)
+1070   3                              {       //Œƒº˛º¥Ω´∑≈ÕÍ
+1071   4                                      vs1003_sdi_write(buf,remain_size);
+1072   4                                      remain_size=0;  //≤•∑≈ÕÍ÷√0 ∑¿÷π"setup"∑µªÿ ±÷ÿ–¬º∆À„¥ÌŒÛ
+1073   4                                      step_show(60,0);//∑≈ÕÍ∫Û≤ªª·÷¥––∫Û√ÊµƒΩ¯∂»Ãı∏¸–¬ À˘“‘‘⁄’‚¿Ô≤π»´
+1074   4                                      switch(play_style)
+1075   4                                      {
+1076   5                                              case 1:   //µ•«˙≤•∑≈ ∑≈ÕÍ∫Û Œƒº˛∫≈≤ª±‰ ‘›Õ£Œƒº˛Œ¥‘ÿ»Î
+1077   5                                                      set_play_stat(3);
+1078   5                                                      break;
+1079   5                                              case 2: //µ•«˙—≠ª∑ ∑≈ÕÍ∫Û Œƒº˛∫≈≤ª±‰ ≤•∑≈«“Œƒº˛Œ¥‘ÿ»Î
+1080   5                                                      set_play_stat(1);
+1081   5                                                      break;
+1082   5                                              case 3: //À≥–Ú≤•∑≈ ∑≈ÕÍ∫Û Œƒº˛∫≈+1 »ÙµΩ◊Ó∫Û‘Ú‘›Õ£Œƒº˛Œ¥‘ÿ»Î ∑Ò‘Ú≤•∑≈Œƒº˛Œ¥‘ÿ»Î 
+1083   5                                                      if(file_id==file_total)
+1084   5                                                              set_play_stat(3);
+1085   5                                                      else{
+1086   6                                                              file_id=file_id%file_total+1;
+1087   6                                                              set_play_stat(1);
+1088   6                                                      }
+1089   5                                                      break;
+1090   5                                              case 4: //À≥–Ú—≠ª∑ ∑≈ÕÍ∫Û Œƒº˛∫≈+1 ≤•∑≈Œƒº˛Œ¥‘ÿ»Î
+1091   5                                                      file_id=file_id%file_total+1;
+1092   5                                                      set_play_stat(1);
+1093   5                                                      break;
+1094   5                                      }
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 19  
+
+1095   4                                      spec_show(0);//œ‘ æ∆µ∆◊ ≤ª”¶‘⁄–¥ÕÍ ˝æ›∫Û¡¢º¥ªÒ»°∆µ∆◊(∑Ò‘Ú‘⁄ªÒ»°∆µ∆◊ ±ª·µ»¥˝,¿À∑— ±º‰)
+1096   4                                      continue;
+1097   4                              }
+1098   3                              else{ //¬˙¬˙µƒ512◊÷Ω⁄»´ «“Ù¿÷
+1099   4                                      vs1003_sdi_write(buf,512);
+1100   4                                      remain_size-=512;
+1101   4                                      //Õ∆Ω¯∂»Ãı
+1102   4                                      step_show((unsigned char)((mp3File.file_size-remain_size)*60/mp3File.file_size),0);             //Ω¯∂»Ãı(total-re
+             -main)*60/total
+1103   4                                      spec_show(0);//œ‘ æ∆µ∆◊ ≤ª”¶‘⁄–¥ÕÍ ˝æ›∫Û¡¢º¥ªÒ»°∆µ∆◊(∑Ò‘Ú‘⁄ªÒ»°∆µ∆◊ ±ª·µ»¥˝,¿À∑— ±º‰)
+1104   4                              }
+1105   3      
+1106   3                              if(seq>1)        //√ø∂¡“ª∏ˆ πseq-1»√À¸Ã¯π˝«∞º∏∏ˆ…»«¯∫ÛŒ™1
+1107   3                                      seq--;
+1108   3                      }
+1109   2      
+1110   2                      if(seq==1)                //Ã¯π˝«∞º∏∏ˆ…»«¯¡À ø…“‘ªÒµ√“Ù¿÷≤Œ ˝¡À
+1111   2                      {//   ±œ‘ æ“Ù¿÷◊¥Ã¨
+1112   3                              time=vs1003_get_bitrate();                //ªÒµ√±»Ãÿ¬ 
+1113   3                              bitrate_show(time);                               //œ‘ æ±»Ãÿ¬ 
+1114   3                              if(time!=0)
+1115   3                                      time=mp3File.file_size/(time>>3)/1000;     //º∆À„≤•∑≈ ±º‰
+1116   3                              samprate_show(vs1003_get_samprate());            //œ‘ æ≤…—˘¬ 
+1117   3      
+1118   3                              switch(vs1003_get_file_type())    //ªÒµ√Œƒº˛¿‡–Õ≤¢œ‘ æ
+1119   3                              {
+1120   4                                      case VS1003_MP3:
+1121   4                                              filetype_show("MP3");
+1122   4                                              break;
+1123   4                                      case VS1003_WMA:
+1124   4                                              filetype_show("WMA");
+1125   4                                              break;
+1126   4                                      case VS1003_WAV:
+1127   4                                              filetype_show("WAV");
+1128   4                                              break;
+1129   4                                      case VS1003_MID:
+1130   4                                              filetype_show("MID");
+1131   4                                              break;
+1132   4                                      case VS1003_NUL:
+1133   4                                              filetype_show("NUL");
+1134   4                                              break;  
+1135   4                              }
+1136   3      
+1137   3                              time_show(time);                           //œ‘ æ≤•∑≈ ±º‰
+1138   3                              seq=0;                                             //seq÷√0 “ª ◊∏ËΩˆœ‘ æ“ª¥Œ“Ù¿÷≤Œ ˝
+1139   3                      }
+1140   2                      if(key(&x,&y))
+1141   2                      {       //¥¶¿Ìº¸≈Ã ‰»Î
+1142   3      //                      delay1ms(50);//œ˚»ıº¸≈Ã∂‘LCDµƒ”∞œÏ
+1143   3                              switch(x*4+y)
+1144   3                              {
+1145   4                                      case 0://…Ë÷√
+1146   4                                              setup();                   //µ˜”√…Ë÷√¥∞ø⁄°°∑µªÿ∫ÛÀ¢–¬≤¢…Ë÷√(À¸ª·–ﬁ∏ƒsurround_sound,low_sound,high_sournd,play_style
+             -±‰¡ø÷µ)
+1147   4                                              frame_show();     //À¢∆¡
+1148   4                                              name_show(file_name,file_name_type);    //œ‘ æŒƒº˛√˚(“—±£¥Êµƒ)  
+1149   4                                              samprate_show(vs1003_get_samprate());            //œ‘ æ≤…—˘¬ 
+1150   4                                              bitrate_show(vs1003_get_bitrate());
+1151   4                                              set_play_style(play_style);       //…Ë÷√≤¢œ‘ æƒ¨»œ≤•∑≈∑Ω Ω
+1152   4                                              switch(vs1003_get_file_type())    //ªÒµ√Œƒº˛¿‡–Õ≤¢œ‘ æ
+1153   4                                              {
+1154   5                                                      case VS1003_MP3:
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 20  
+
+1155   5                                                              filetype_show("MP3");
+1156   5                                                              break;
+1157   5                                                      case VS1003_WMA:
+1158   5                                                              filetype_show("WMA");
+1159   5                                                              break;
+1160   5                                                      case VS1003_WAV:
+1161   5                                                              filetype_show("WAV");
+1162   5                                                              break;
+1163   5                                                      case VS1003_MID:
+1164   5                                                              filetype_show("MID");
+1165   5                                                              break;
+1166   5                                                      case VS1003_NUL:
+1167   5                                                              filetype_show("NUL");
+1168   5                                                              break;  
+1169   5                                              }
+1170   4                                              set_vol(vol);                              //…Ë÷√≤¢œ‘ æƒ¨»œ“Ù¡ø
+1171   4                                              set_surround_sound(surround_sound);   //…Ë÷√≤¢œ‘ æƒ¨»œª∑»∆“Ù
+1172   4                                              set_low_sound(low_sound);          //…Ë÷√≤¢œ‘ æƒ¨»œµÕ“Ù
+1173   4                                              set_high_sound(high_sound);                //…Ë÷√≤¢œ‘ æƒ¨»œﬂÙ
+1174   4                                              set_play_stat(play_stat);               //…Ë÷√≤¢œ‘ æ≤•∑≈◊¥Ã¨
+1175   4                                              spec_show(1);//÷ÿ÷√œ‘ æ∆µ∆◊
+1176   4                                              step_show((unsigned char)((mp3File.file_size-remain_size)*60/mp3File.file_size),1);             //÷ÿ–¬œ‘ æΩ¯∂»Ãı
+1177   4                                              time_show(time);                                           //œ‘ æ ±º‰
+1178   4                                              break;
+1179   4                                      case 1://“Ù¡ø‘ˆº”
+1180   4                                              set_vol(vol+1);
+1181   4                                              break;
+1182   4                                      case 2://¬º“Ùƒ£ Ω
+1183   4                                              recorder();
+1184   4                                              //œ¬»˝––º∆À„SDø®÷–π≤”–∂‡…Ÿ ◊“Ù¿÷
+1185   4                                              file_total=0;
+1186   4                                              while(fat_open_file("????????MP3",file_total,&mp3File)==0)file_total++;
+1187   4                                              file_total--;
+1188   4                                              frame_show();     //À¢∆¡
+1189   4                                              set_play_style(play_style);       //…Ë÷√≤¢œ‘ æƒ¨»œ≤•∑≈∑Ω Ω
+1190   4                                              set_vol(vol);                              //…Ë÷√≤¢œ‘ æƒ¨»œ“Ù¡ø
+1191   4                                              set_surround_sound(surround_sound);   //…Ë÷√≤¢œ‘ æƒ¨»œª∑»∆“Ù
+1192   4                                              set_low_sound(low_sound);          //…Ë÷√≤¢œ‘ æƒ¨»œµÕ“Ù
+1193   4                                              set_high_sound(high_sound);                //…Ë÷√≤¢œ‘ æƒ¨»œﬂÙ
+1194   4                                              set_play_stat(1);        //œ‘ æ≤•∑≈◊¥Ã¨  //◊¥Ã¨∏ƒŒ™≤•∑≈Œƒº˛Œ¥‘ÿ»Î                               
+1195   4                                              break;
+1196   4                                      case 4://…œ“ª«˙
+1197   4                                              if(file_id<=1)
+1198   4                                                      file_id=file_total;
+1199   4                                              else
+1200   4                                                      file_id--;
+1201   4                                              play_stat=1;
+1202   4                                              vs1003_flush();
+1203   4                                              break;
+1204   4                                      case 5://≤•∑≈/‘›Õ£
+1205   4                                              switch(play_stat)
+1206   4                                              {
+1207   5                                                      case 1:
+1208   5                                                              vs1003_set_pause(1);
+1209   5                                                              set_play_stat(3);
+1210   5                                                              break;
+1211   5                                                      case 2:
+1212   5                                                              vs1003_set_pause(1);
+1213   5                                                              set_play_stat(4);
+1214   5                                                              break;
+1215   5                                                      case 3:
+1216   5                                                              vs1003_set_pause(0);
+C51 COMPILER V9.01   MUSICPLAYER                                                           03/27/2012 23:25:52 PAGE 21  
+
+1217   5                                                              set_play_stat(1);
+1218   5                                                              break;
+1219   5                                                      case 4:
+1220   5                                                              vs1003_set_pause(0);
+1221   5                                                              set_play_stat(2);
+1222   5                                                              break;
+1223   5                                              }
+1224   4                                              break;
+1225   4                                      case 6://œ¬“ª«˙
+1226   4                                              if(file_id>=file_total)
+1227   4                                                      file_id=1;
+1228   4                                              else
+1229   4                                                      file_id++;
+1230   4                                              play_stat=1;
+1231   4                                              vs1003_flush();
+1232   4                                              break;
+1233   4                                      case 9://“Ù¡øºı…Ÿ
+1234   4                                              set_vol(vol-1);
+1235   4                                              break;  
+1236   4                              }
+1237   3                      }               
+1238   2              }
+1239   1      }
+1240          
+1241          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =  27743    ----
+   CONSTANT SIZE    =   9465    ----
+   XDATA SIZE       =    625     819
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      1    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      5      17
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

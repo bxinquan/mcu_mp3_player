@@ -1,0 +1,130 @@
+红外遥控发射芯片采用PPM编码方式,当发射器按键按下后,将发射一组108ms的编码脉冲。遥控编码脉冲由前导码、8位用户码、8位用户码的反码、8位操作码以及8位操作码的反码组成。通过对用户码的检验，每个遥控器只能控制一个设备动作，这样可以有效地防止多个设备之间的干扰。编码后面还要有编码的反码，用来检验编码接收的正确性，防止误操作，增强系统的可靠性。前导码是一个遥控码的起始部分，由一个9ms的低电平(起始码)和一个4. 5ms的高电平(结果码)组成，作为接受数据的准备脉冲。以脉宽为0. 56ms、周期为1. 12ms的组合表示二进制的“0”；以脉宽为1. 68ms、周期为2. 24ms的组合表示二进制的“1”。如果按键按下超过108ms仍未松开,接下来发射的代码(连发代码)将仅由起始码(9ms)和结束码(2. 5ms)组成。
+
+单片机采用外部中断INTI管脚和红外接收头的信号线相连，中断方式为边沿触发方式。并用定时器0计算中断的间隔时间，来区分前导码、二进制的“1”、“0”码。并将8位操作码提取出来在数码管上显示。
+
+// 解码值在Im[2]中，当IrOK=1时解码有效。 
+/* 51单片机红外遥控解码程序 */
+//用遥控器对准红外接收头，按下遥控器按键，在数码管前两位上就会显示对应按键的编码
+
+#include <reg52.h>
+#define uchar unsigned char 
+sbit dula=P2^6;
+sbit wela=P2^7;
+uchar code table[]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,
+                        0x07,0x7f,0x6f,0x77,0x7c,0x39,0x5e,0x79,0x71};
+
+uchar f;
+
+#define Imax 14000    //此处为晶振为11.0592时的取值, 
+#define Imin 8000    //如用其它频率的晶振时,
+#define Inum1 1450    //要改变相应的取值。
+#define Inum2 700 
+#define Inum3 3000 
+
+unsigned char Im[4]={0x00,0x00,0x00,0x00};
+uchar show[2]={0,0};
+unsigned long m,Tc;
+unsigned char IrOK;
+
+
+void delay(uchar i)
+{
+  uchar j,k; 
+  for(j=i;j>0;j--)
+    for(k=125;k>0;k--);
+}
+
+void display()
+{
+   dula=0;
+   P0=table[show[0]];
+   dula=1;
+   dula=0;
+   
+   wela=0;
+   P0=0xfe;
+   wela=1;
+   wela=0;
+   delay(5);
+   
+   P0=table[show[1]];
+   dula=1;
+   dula=0;
+   
+   P0=0xfd;
+   wela=1;
+   wela=0;
+   delay(5);
+}
+
+
+//外部中断解码程序
+void intersvr1(void) interrupt 2 using 1
+{
+ Tc=TH0*256+TL0;                                               //提取中断时间间隔时长
+ TH0=0; 
+    TL0=0;              //定时中断重新置零
+ if((Tc>Imin)&&(Tc<Imax))
+      { 
+  m=0;
+        f=1;
+  return;
+      }       //找到启始码
+   if(f==1)
+      {
+        if(Tc>Inum1&&Tc<Inum3) 
+    {
+   Im[m/8]=Im[m/8]>>1|0x80; m++; 
+       }
+      if(Tc>Inum2&&Tc<Inum1) 
+        {
+         Im[m/8]=Im[m/8]>>1; m++; //取码
+  }
+  if(m==32) 
+   {
+         m=0;  
+         f=0;
+         if(Im[2]==~Im[3]) 
+      {
+           IrOK=1; 
+   }
+        else IrOK=0;   //取码完成后判断读码是否正确
+     }
+               //准备读下一码
+   }
+ 
+}
+
+
+/*演示主程序*/
+void main(void)
+{
+    unsigned int  a;
+   
+ m=0;
+    f=0;
+ EA=1;
+ 
+ IT1=1;EX1=1;
+ 
+ TMOD=0x11;  
+ TH0=0;TL0=0;
+ TR0=1;//ET0=1;
+
+ while(1)
+ {
+ 
+       if(IrOK==1) 
+  {
+      show[1]=Im[2] & 0x0F;     //取键码的低四位
+           show[0]=Im[2] >> 4;  
+           IrOK=0;
+     
+  }
+           for(a=100;a>0;a--)
+          {
+    display();
+   }
+ 
+ }
+}
